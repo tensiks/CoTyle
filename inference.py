@@ -57,9 +57,11 @@ def main(args):
         pipeline = CoTylePipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16, text_encoder=None,processor=None)
 
     qwen_text_visual_encoder = Qwen2_5_VLForConditionalGeneration_Quant.from_pretrained(
-        os.path.join(args.model_path, 'text_encoder'),
-    ).to('cuda', dtype=weight_type)
-
+        os.path.join(args.model_path, "text_encoder"),
+        torch_dtype=weight_type,
+        # low_cpu_mem_usage=True,
+        device_map="cuda",
+    )
     qwen_text_visual_encoder = Qwen2_5_VL_Quant(unitok, qwen_text_visual_encoder)
     qwen_text_visual_encoder.to('cuda', dtype=weight_type)
 
@@ -76,8 +78,17 @@ def main(args):
         pipeline.scheduler = FlowMatchEulerDiscreteScheduler.from_config(  # use fixed shift=3.2
             pipeline.scheduler.config, shift=3.2, shift_terminal=None, use_dynamic_shifting=False)
 
+    del qwen_text_visual_encoder
 
-    pipeline.to('cuda', dtype=torch.bfloat16)
+    # pipeline.to('cuda', dtype=torch.bfloat16)
+    pipeline.transformer.enable_group_offload(
+        onload_device=torch.device("cuda"),
+        offload_device=torch.device("cpu"),
+        offload_type="block_level",
+        num_blocks_per_group=16,       # increase this to use more GPU memory
+        use_stream=True,              # overlaps prefetch/offload with compute (needs some extra CPU RAM for double-buffering)
+        low_cpu_mem_usage=True,       # reduces CPU-side buffer duplication from streaming
+    )
 
     pipeline.set_progress_bar_config(disable=None)
     os.makedirs(output_dir, exist_ok=True)
@@ -91,18 +102,26 @@ def main(args):
 
     with open(f'{args.model_path}/freq.json', 'r') as f:
         code_freq = json.load(f)
-    generated_ids = style_generator.generate(
-        **style_generator_inputs,
-        max_new_tokens=195,
-        temperature=1.0,  # Increased from 0.7
-        top_k=200,         # Added top_k sampling
-        top_p=0.95,       # Added nucleus sampling
-        do_sample=True ,   # Enable sampling
-        repetition_penalty=50.0,
-        code_freq=code_freq,
-        code_freq_threshold=args.freq_threshold,
-        k=args.freq_k,
-        )
+    
+    # Update the code to generate sytyles
+    generate = False
+    if(generate):
+        generated_ids = style_generator.generate(
+            **style_generator_inputs,
+            max_new_tokens=195,
+            temperature=1.0,  # Increased from 0.7
+            top_k=200,         # Added top_k sampling
+            top_p=0.95,       # Added nucleus sampling
+            do_sample=True ,   # Enable sampling
+            repetition_penalty=50.0,
+            code_freq=code_freq,
+            code_freq_threshold=args.freq_threshold,
+            k=args.freq_k,
+            )
+    else:
+        generated_ids=torch.load("generated_ids.pt")
+
+
 
     if args.accelerate:
         sample_steps = 4

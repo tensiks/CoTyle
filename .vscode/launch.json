@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug inference_batch.py",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "/home/nithira/lora-video/ltx-video/conda/cotyle/bin/python",
+            "program": "/home/nithira/lora-video/praveen/CoTyle/inference.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "/home/nithira/lora-video/praveen/CoTyle",
+            "args": [
+                "--model_path",
+                "/home/nithira/.cache/huggingface/hub/models--Kwai-Kolors--CoTyle/snapshots/625c9961eb23fedd32810ded17d4889bcb9ceb59",
+                "--style_code",
+                "1234567",
+                "--prompt",
+                "A lovely crystal snake spirit, slender and nimble, wears an exquisite crystal crown atop its head. Its scales are translucent, shimmering like crystal, its eyes are bright and round, and its expression is lively. Its body coils naturally, its tail gracefully curved, its overall posture harmonious and beautiful.",
+                "--output_path",
+                "outputs",
+                "--seed",
+                "1024",
+                // "--accelerate"
+            ]
+        }
+    ]
+}
