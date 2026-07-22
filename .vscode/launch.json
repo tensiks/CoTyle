@@ -5,7 +5,7 @@
             "name": "Debug inference_batch.py",
             "type": "debugpy",
             "request": "launch",
-            "python": "/home/nithira/lora-video/ltx-video/conda/cotyle/bin/python",
+            "python": "/home/nithira/miniconda3/envs/cotyle/bin/python",
             "program": "/home/nithira/lora-video/praveen/CoTyle/inference.py",
             "console": "integratedTerminal",
             "justMyCode": true,
@@ -21,6 +21,7 @@
                 "outputs",
                 "--seed",
                 "1024",
+                "--accelerate",
                 // "--accelerate"
             ]
         }
