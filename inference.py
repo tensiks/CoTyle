@@ -104,7 +104,7 @@ def main(args):
         code_freq = json.load(f)
     
     # Update the code to generate sytyles
-    generate = False
+    generate = True
     if(generate):
         generated_ids = style_generator.generate(
             **style_generator_inputs,
@@ -118,6 +118,7 @@ def main(args):
             code_freq_threshold=args.freq_threshold,
             k=args.freq_k,
             )
+        torch.save(generated_ids,"generated_ids.pt")
     else:
         generated_ids=torch.load("generated_ids.pt")
 
@@ -142,7 +143,18 @@ def main(args):
     }
 
     with torch.inference_mode():
+        decode = False
+        if(decode):
+            latents= torch.load("latents.pt")
+            pipeline.vae.to(torch.device("cuda"))
+            image = pipeline.vae.decode(latents.to(pipeline.vae.dtype), return_dict=False)[0][
+                :, :, 0
+            ]
+            image = pipeline.image_processor.postprocess(image, output_type="pil")
+            image[0].save(f"{output_dir}/{args.style_code}.png")
+            exit()
         output = pipeline(**inputs)
+        
 
     for idx, res in enumerate(output.images):
         res.save(f"{output_dir}/{args.style_code}.png")

@@ -1090,6 +1090,8 @@ class PiCoTylePipeline(QwenImageEditPipeline, PiFlowLoaderMixin):
             )
             # Note: multiply by std, not divide (key difference from original)
             latents = latents * latents_std + latents_mean
+            torch.save(latents,"latents.pt")
+            self.vae.to(device)
             image = self.vae.decode(latents.to(self.vae.dtype), return_dict=False)[0][
                 :, :, 0
             ]

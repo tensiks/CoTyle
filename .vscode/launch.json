@@ -6,23 +6,23 @@
             "type": "debugpy",
             "request": "launch",
             "python": "/home/nithira/miniconda3/envs/cotyle/bin/python",
-            "program": "/home/nithira/lora-video/praveen/CoTyle/inference.py",
+            "program": "/home/nithira/cotyle/CoTyle/inference.py",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "cwd": "/home/nithira/lora-video/praveen/CoTyle",
+            "cwd": "/home/nithira/cotyle/CoTyle",
             "args": [
                 "--model_path",
                 "/home/nithira/.cache/huggingface/hub/models--Kwai-Kolors--CoTyle/snapshots/625c9961eb23fedd32810ded17d4889bcb9ceb59",
                 "--style_code",
-                "1234567",
+                "4485637",
                 "--prompt",
-                "A lovely crystal snake spirit, slender and nimble, wears an exquisite crystal crown atop its head. Its scales are translucent, shimmering like crystal, its eyes are bright and round, and its expression is lively. Its body coils naturally, its tail gracefully curved, its overall posture harmonious and beautiful.",
+                "Cinematic portrait of a beautiful young woman, mysterious expression, intricate metallic jewelry, smokey eye makeup, wet wild dark hair, vibrant neon city lights in the background, rain, cyberpunk aesthetic, dramatic shadows, highly detailed RAW photo.",
+                // "A lovely crystal snake spirit, slender and nimble, wears an exquisite crystal crown atop its head. Its scales are translucent, shimmering like crystal, its eyes are bright and round, and its expression is lively. Its body coils naturally, its tail gracefully curved, its overall posture harmonious and beautiful.",
                 "--output_path",
                 "outputs",
                 "--seed",
                 "1024",
                 "--accelerate",
-                // "--accelerate"
             ]
         }
     ]
