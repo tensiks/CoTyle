@@ -578,7 +578,10 @@ class CoTylePipeline(QwenImageEditPipeline):
             ).to(latents.device, latents.dtype)
             latents = latents / latents_std + latents_mean
             self.vae.to(device)
-            image = self.vae.decode(latents, return_dict=False)[0][:, :, 0]
+            # One image at a time: decoding a whole batch at 1024x1024 can run out of GPU memory.
+            image = torch.cat(
+                [self.vae.decode(l[None], return_dict=False)[0][:, :, 0] for l in latents]
+            )
             image = image.detach()
             image = self.image_processor.postprocess(image, output_type=output_type)
 
@@ -1147,9 +1150,14 @@ class PiCoTylePipeline(QwenImageEditPipeline, PiFlowLoaderMixin):
             )
             # Note: multiply by std, not divide (key difference from original)
             latents = latents * latents_std + latents_mean
-            image = self.vae.decode(latents.to(self.vae.dtype), return_dict=False)[0][
-                :, :, 0
-            ]
+            self.vae.to(latents.device)
+            # One image at a time: decoding a whole batch at 1024x1024 can run out of GPU memory.
+            image = torch.cat(
+                [
+                    self.vae.decode(l[None].to(self.vae.dtype), return_dict=False)[0][:, :, 0]
+                    for l in latents
+                ]
+            )
             image = self.image_processor.postprocess(image, output_type=output_type)
 
         # Offload all models

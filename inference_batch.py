@@ -22,6 +22,7 @@ from models.utils import (
 )
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 from models.model import StyleGenerator
+from models.style_code import add_style_code_args, make_style_ids_fn
 import json
 from models.model import Qwen2_5_VLForConditionalGeneration_Quant, Qwen2_5_VL_Quant
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
@@ -143,63 +144,70 @@ def main(args):
         for line in f:
             prompts.append(line.strip())
 
-    res_imgs = []
-    seeds = []
+    negative_prompt = "丑陋，怪物，怪兽，畸形，变异，结构不合理，肢体不合理，人脸扭曲, 肢体错乱,突兀"
+    true_cfg_scale = 6.0
+
+    def image_path(style_code, prompt_i):
+        return f"{output_dir}/batch/{style_code}-{prompt_i}.png"
+
+    os.makedirs(f"{output_dir}/batch/", exist_ok=True)
+    pairs = [(c, p) for c in args.style_code for p in range(len(prompts))]
+    pending = [(c, p) for c, p in pairs if not (args.skip_existing and os.path.exists(image_path(c, p)))]
+    print(f"{len(pending)} of {len(pairs)} images to generate")
+
+    # The text encoder and the transformer do not fit on the GPU together: encode every
+    # (style code, prompt) pair first, then free the text encoder and denoise.
+    style_ids = make_style_ids_fn(args, style_generator, code_freq)
+    encoded = {}
+    for style_code in tqdm(dict.fromkeys(c for c, _ in pending), desc="encoding"):
+        generated_ids = style_ids(style_code)
+        if args.style_mode == "ordered":
+            print(f"style code {style_code} -> section levels {style_ids.levels(style_code)}")
+        for prompt_i in [p for c, p in pending if c == style_code]:
+            encoded[style_code, prompt_i] = pipeline.encode_inputs(
+                image=[placeholder_image],
+                prompt=prompts[prompt_i],
+                negative_prompt=negative_prompt,
+                true_cfg_scale=true_cfg_scale,
+                num_images_per_prompt=1,
+                codebook_id=generated_ids,
+            )
     del pipeline.text_encoder
     torch.cuda.empty_cache()
 
-    for style_code in tqdm(args.style_code):
-        set_seed(style_code)
-        style_generator_inputs = dict()
-        style_generator_inputs["input_ids"] = torch.randint(
-            low=0, high=1024, size=(1, 1)
-        ).to("cuda")
-        style_generator_inputs["attention_mask"] = torch.ones(
-            style_generator_inputs["input_ids"].shape
-        ).to("cuda")
+    if args.accelerate:
+        sample_steps = 4
+    else:
+        sample_steps = 40
 
-        generated_ids = style_generator.generate(
-            **style_generator_inputs,
-            max_new_tokens=195,
-            temperature=1.0,
-            top_k=200,
-            top_p=0.95,
-            do_sample=True,
-            repetition_penalty=50.0,
-            code_freq=code_freq,
-            code_freq_threshold=args.freq_threshold,
-            k=args.freq_k,
-        )
-
+    # Batch codes that share a prompt: their embeddings have the same length, and every forward
+    # pass streams the whole transformer from CPU, so a batch costs little more than one image.
+    batches = []
+    for prompt_i in range(len(prompts)):
+        codes = [c for c, p in pending if p == prompt_i]
+        batches += [(prompt_i, codes[i:i + args.batch_size]) for i in range(0, len(codes), args.batch_size)]
+    for prompt_i, codes in tqdm(batches, desc="generating"):
         set_seed(args.seed)
+        batch = [encoded[c, prompt_i] for c in codes]
+        inputs = {
+            "image": [placeholder_image],
+            # One generator per image, all with the same seed: every image starts from the same noise.
+            "generator": [torch.Generator().manual_seed(args.seed) for _ in codes],
+            "true_cfg_scale": true_cfg_scale,
+            "num_inference_steps": sample_steps,
+            "guidance_scale": 1.0,
+            "num_images_per_prompt": 1,
+            # in place of prompt / negative_prompt
+            **{k: torch.cat([e[k] for e in batch]) for k in batch[0]},
+        }
 
-        if args.accelerate:
-            sample_steps = 4
-        else:
-            sample_steps = 40
+        with torch.inference_mode():
+            output = pipeline(**inputs)
+        for style_code, image in zip(codes, output.images):
+            image.save(image_path(style_code, prompt_i))
 
-        res_imgs_line = []
-        for prompt_i, prompt in enumerate(prompts):
-
-            inputs = {
-                "image": [placeholder_image],
-                "prompt": prompt,
-                "generator": torch.manual_seed(args.seed),
-                "true_cfg_scale": 6.0,
-                "negative_prompt": "丑陋，怪物，怪兽，畸形，变异，结构不合理，肢体不合理，人脸扭曲, 肢体错乱,突兀",
-                "num_inference_steps": sample_steps,
-                "guidance_scale": 1.0,
-                "num_images_per_prompt": 1,
-                "codebook_id": generated_ids,
-            }
-
-            with torch.inference_mode():
-                output = pipeline(**inputs)
-            res_imgs_line.append(output.images[0])
-            os.makedirs(f"{output_dir}/batch/", exist_ok=True)
-            output.images[0].save(f"{output_dir}/batch/{style_code}-{prompt_i}.png")
-        res_imgs.append(copy.deepcopy(res_imgs_line))
-        seeds.append(style_code)
+    res_imgs = [[Image.open(image_path(c, p)) for p in range(len(prompts))] for c in args.style_code]
+    seeds = list(args.style_code)
 
     concatenate_images_with_sref(res_imgs, seeds).save(f"{output_dir}/batch.png")
     print(f"The results are saved to {output_dir}/batch.png")
@@ -249,6 +257,11 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--accelerate", action="store_true")
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="codes generated together per forward pass (same prompt)")
+    parser.add_argument("--skip_existing", action="store_true",
+                        help="do not regenerate images that already exist in --output_path")
+    add_style_code_args(parser)
 
     args = parser.parse_args()
     main(args)
