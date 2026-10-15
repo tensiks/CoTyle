@@ -122,10 +122,15 @@ def main(args):
 
     # pipeline.to("cpu", dtype=torch.bfloat16)
     # pipeline.enable_model_cpu_offload()
+    # Same settings as inference.py: leaf_level offload re-creates the weights in RAM on every
+    # offload and gets the process OOM-killed when the 41 GB transformer does not fit in RAM.
     pipeline.transformer.enable_group_offload(
         onload_device=torch.device("cuda"),
         offload_device=torch.device("cpu"),
-        offload_type="leaf_level",
+        offload_type="block_level",
+        num_blocks_per_group=16,
+        use_stream=True,
+        low_cpu_mem_usage=True,
     )
     pipeline.set_progress_bar_config(disable=True)
     os.makedirs(output_dir, exist_ok=True)
