@@ -10,6 +10,7 @@ import argparse
 from models.utils import set_seed, load_and_process_config, patched_from_model_config
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 from models.model import StyleGenerator
+from models.style_code import add_style_code_args, make_style_ids_fn
 import json
 from models.model import Qwen2_5_VLForConditionalGeneration_Quant, Qwen2_5_VL_Quant
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLForConditionalGeneration
@@ -94,32 +95,13 @@ def main(args):
     os.makedirs(output_dir, exist_ok=True)
     placeholder_image = Image.new("RGB", (392, 392), (0, 0, 0)) 
 
-    set_seed(args.style_code)
-    style_generator_inputs = dict()
-    style_generator_inputs['input_ids'] = torch.randint(low=0, high=1024, size=(1, 1)).to('cuda')
-    style_generator_inputs['attention_mask'] = torch.ones(style_generator_inputs['input_ids'].shape).to('cuda')
-    
-
     with open(f'{args.model_path}/freq.json', 'r') as f:
         code_freq = json.load(f)
-    
-    # Update the code to generate sytyles
-    generate = False
-    if(generate):
-        generated_ids = style_generator.generate(
-            **style_generator_inputs,
-            max_new_tokens=195,
-            temperature=1.0,  # Increased from 0.7
-            top_k=200,         # Added top_k sampling
-            top_p=0.95,       # Added nucleus sampling
-            do_sample=True ,   # Enable sampling
-            repetition_penalty=50.0,
-            code_freq=code_freq,
-            code_freq_threshold=args.freq_threshold,
-            k=args.freq_k,
-            )
-    else:
-        generated_ids=torch.load("generated_ids.pt")
+
+    style_ids = make_style_ids_fn(args, style_generator, code_freq)
+    generated_ids = style_ids(args.style_code)
+    if args.style_mode == "ordered":
+        print(f"style code {args.style_code} -> section levels {style_ids.levels(args.style_code)}")
 
 
 
@@ -196,6 +178,7 @@ if __name__ == "__main__":
         "--accelerate",
         action='store_true'
     )
+    add_style_code_args(parser)
 
     args = parser.parse_args()
     main(args)
