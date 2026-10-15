@@ -105,6 +105,21 @@ def main(args):
 
 
 
+    negative_prompt = "丑陋，怪物，怪兽，畸形，变异，结构不合理，肢体不合理，人脸扭曲, 肢体错乱,突兀"
+    true_cfg_scale = 6.0
+
+    # The text encoder and the transformer do not fit on the GPU together: encode first, then free the encoder.
+    encoded = pipeline.encode_inputs(
+        image=[placeholder_image],
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        true_cfg_scale=true_cfg_scale,
+        num_images_per_prompt=1,
+        codebook_id=generated_ids,
+    )
+    del pipeline.text_encoder
+    torch.cuda.empty_cache()
+
     if args.accelerate:
         sample_steps = 4
     else:
@@ -113,14 +128,12 @@ def main(args):
     set_seed(args.seed)
     inputs = {
         "image": [placeholder_image],
-        "prompt": prompt,
         "generator": torch.manual_seed(args.seed),
-        "true_cfg_scale": 6.0,
-        "negative_prompt": "丑陋，怪物，怪兽，畸形，变异，结构不合理，肢体不合理，人脸扭曲, 肢体错乱,突兀",
+        "true_cfg_scale": true_cfg_scale,
         "num_inference_steps": sample_steps,
         "guidance_scale": 1.0,
         "num_images_per_prompt": 1,
-        "codebook_id": generated_ids,
+        **encoded,  # in place of prompt / negative_prompt
     }
 
     with torch.inference_mode():

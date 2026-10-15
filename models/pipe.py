@@ -153,6 +153,70 @@ class CoTylePipeline(QwenImageEditPipeline):
         return prompt_embeds, prompt_embeds_mask
 
     @torch.no_grad()
+    def encode_inputs(
+        self,
+        image: PipelineImageInput,
+        prompt: Union[str, List[str]],
+        negative_prompt: Union[str, List[str]] = None,
+        true_cfg_scale: float = 4.0,
+        num_images_per_prompt: int = 1,
+        max_sequence_length: int = 512,
+        codebook_id: Any = None,
+    ):
+        """Prompt and negative-prompt embeddings, computed as __call__ computes them.
+
+        Pass the returned dict to __call__ as keyword arguments (with the same num_images_per_prompt);
+        __call__ then does not use the text encoder, so it can be freed before denoising.
+        """
+        image_size = image[0].size if isinstance(image, list) else image.size
+        calculated_width, calculated_height, _ = calculate_dimensions(
+            1024 * 1024, image_size[0] / image_size[1]
+        )
+        prompt_image = self.image_processor.resize(
+            image, calculated_height, calculated_width
+        )
+        do_true_cfg = true_cfg_scale > 1 and negative_prompt is not None
+        return self._encode_inputs(
+            prompt_image,
+            prompt,
+            negative_prompt if do_true_cfg else None,
+            num_images_per_prompt,
+            max_sequence_length,
+            codebook_id,
+        )
+
+    def _encode_inputs(
+        self,
+        prompt_image,
+        prompt,
+        negative_prompt,
+        num_images_per_prompt,
+        max_sequence_length,
+        codebook_id,
+    ):
+        device = next(self.text_encoder.parameters()).device
+        prompt_embeds, prompt_embeds_mask = self.encode_prompt(
+            image=prompt_image,
+            prompt=prompt,
+            device=device,
+            num_images_per_prompt=num_images_per_prompt,
+            max_sequence_length=max_sequence_length,
+            codebook_id=codebook_id,
+        )
+        encoded = dict(prompt_embeds=prompt_embeds, prompt_embeds_mask=prompt_embeds_mask)
+        if negative_prompt is not None:
+            cfg_img = Image.new("RGB", (392, 392), (0, 0, 0))
+            encoded["negative_prompt_embeds"], encoded["negative_prompt_embeds_mask"] = self.encode_prompt(
+                image=cfg_img,
+                prompt=negative_prompt,
+                device=device,
+                num_images_per_prompt=num_images_per_prompt,
+                max_sequence_length=max_sequence_length,
+                codebook_id=None,
+            )
+        return encoded
+
+    @torch.no_grad()
     def __call__(
         self,
         image: Optional[PipelineImageInput] = None,
@@ -318,36 +382,25 @@ class CoTylePipeline(QwenImageEditPipeline):
 
         do_true_cfg = true_cfg_scale > 1 and has_neg_prompt
 
-        del self.text_encoder
-        torch.cuda.empty_cache()
-        
-        calculate_embeds = False
-        if(calculate_embeds):
-            prompt_embeds, prompt_embeds_mask = self.encode_prompt(
-                image=prompt_image,
-                prompt=prompt,
-                prompt_embeds=prompt_embeds,
-                prompt_embeds_mask=prompt_embeds_mask,
-                device=device,
-                num_images_per_prompt=num_images_per_prompt,
-                max_sequence_length=max_sequence_length,
-                codebook_id=kwargs.get("codebook_id"),
+        # Callers that free the text encoder before denoising pass the embeddings from encode_inputs.
+        if prompt_embeds is None:
+            encoded = self._encode_inputs(
+                prompt_image,
+                prompt,
+                negative_prompt if do_true_cfg else None,
+                num_images_per_prompt,
+                max_sequence_length,
+                kwargs.get("codebook_id"),
             )
-
-            if do_true_cfg:
-                cfg_img = Image.new("RGB", (392, 392), (0, 0, 0))
-                negative_prompt_embeds, negative_prompt_embeds_mask = self.encode_prompt(
-                    image=cfg_img,
-                    prompt=negative_prompt,
-                    prompt_embeds=negative_prompt_embeds,
-                    prompt_embeds_mask=negative_prompt_embeds_mask,
-                    device=device,
-                    num_images_per_prompt=num_images_per_prompt,
-                    max_sequence_length=max_sequence_length,
-                    codebook_id=None,
-                )
-        else: (prompt_embeds, prompt_embeds_mask,negative_prompt_embeds, negative_prompt_embeds_mask) = torch.load("embeds.pt")
-        # torch.save((prompt_embeds, prompt_embeds_mask,negative_prompt_embeds, negative_prompt_embeds_mask),"embeds.pt")
+            prompt_embeds = encoded["prompt_embeds"]
+            prompt_embeds_mask = encoded["prompt_embeds_mask"]
+            negative_prompt_embeds = encoded.get("negative_prompt_embeds")
+            negative_prompt_embeds_mask = encoded.get("negative_prompt_embeds_mask")
+        prompt_embeds = prompt_embeds.to(device)
+        prompt_embeds_mask = prompt_embeds_mask.to(device)
+        if do_true_cfg:
+            negative_prompt_embeds = negative_prompt_embeds.to(device)
+            negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(device)
 
         # 4. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels // 4
@@ -558,6 +611,10 @@ class PiCoTylePipeline(QwenImageEditPipeline, PiFlowLoaderMixin):
         policy_kwargs (`Dict`, *optional*):
             Additional keyword arguments to pass to the policy class.
     """
+
+    # Same pre-encoding as CoTylePipeline; __call__ ignores the negative-prompt embeddings (no CFG).
+    encode_inputs = CoTylePipeline.encode_inputs
+    _encode_inputs = CoTylePipeline._encode_inputs
 
     def __init__(
         self,
